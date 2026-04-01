@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Aioli from '@biowasm/aioli';
 import { parseFasta, selectBestHits } from './utils';
 import {
@@ -21,10 +21,18 @@ import {
   ThemeProvider,
   createTheme,
   CssBaseline,
-  Alert
+  Alert,
+  Grid,
+  Link,
+  List,
+  ListItem,
+  ListItemText,
+  Divider
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ScienceIcon from '@mui/icons-material/Science';
+import DownloadIcon from '@mui/icons-material/Download';
+import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
 
 const darkTheme = createTheme({
   palette: {
@@ -49,11 +57,31 @@ const PIDENT_THRESHOLD = 98; // Ex: 90% identity required
 const COVERAGE_THRESHOLD = 99; // Ex: 70% coverage required on both sequences
 
 function App() {
-  const [inputSequences, setInputSequences] = useState('>query_1\nCGCATCGATGAAGAACGCAGCGAAATGCGATAAGTAATGTGAATTGCAGAATTCAGTGAATCATCGAATCTTTGAACGCACATTGCGCCCCTTGGTATTCC');
+  const [inputSequences, setInputSequences] = useState('>example1\nAACATCTCAAACCTCTCGACACTTGCGTTTGAGAGGATTGGATTTGAGCGATCCCGACTCCTTCGCCAGAAAGAGGAGGGTCGCTTGAAATGCAGATGCAGCAGGACATTCTTCTGAGCTAAAAGCATATTTATTTAGTCCCGTCAAACGGATTATTACTTTTGCTTCAGCTAACATAAAAGGTTGAATGAGCCATTATCGCTGATTGCAGGAAAACACGTCCGTAACAGGACTTGTAA\n>example2\nAACATCTCAAACCTCTCGACACTTGCGTTTGAGAGGATTGGATTTGAGCGATCCCGACTCCTTCGCCAGAAAGAGGAGGGTCGCTTGAAATGCAGATGCAGCAGGACATTCTTCTGAGCTAAAAGCATATTTATTTAGTCCCGTCAAACGGATTATTACTTTTGCTTCAGCTAACATAAAAGGTTGAATGAGCCATTATCGCTGATTGCAG');
   const [isMapping, setIsMapping] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
   const [results, setResults] = useState(null);
   const [errorMessages, setErrorMessages] = useState([]);
+  const [clusterData, setClusterData] = useState(null);
+  const [selectedCluster, setSelectedCluster] = useState(null);
+
+  useEffect(() => {
+    const fetchClusterData = async () => {
+      try {
+        const base = import.meta.env.BASE_URL || '/';
+        const res = await fetch(`${base}cluster_data.json`);
+        if (res.ok) {
+          const data = await res.json();
+          setClusterData(data);
+        } else {
+          console.error("Failed to fetch cluster data.");
+        }
+      } catch (err) {
+        console.error("Error fetching cluster data:", err);
+      }
+    };
+    fetchClusterData();
+  }, []);
 
 
 
@@ -200,7 +228,7 @@ function App() {
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-      <Container maxWidth="md" sx={{ py: 6 }}>
+      <Container maxWidth="xl" sx={{ py: 6 }}>
         <Box textAlign="center" mb={5}>
           <Typography variant="h3" component="h1" fontWeight="bold" gutterBottom
             sx={{
@@ -224,8 +252,10 @@ function App() {
           </Typography>
         </Box>
 
-        <Card elevation={4} sx={{ mb: 4, borderRadius: 3 }}>
-          <CardContent sx={{ p: 4 }}>
+        <Grid container spacing={4}>
+          <Grid item xs={12} md={6}>
+            <Card elevation={4} sx={{ mb: 4, borderRadius: 3 }}>
+              <CardContent sx={{ p: 4 }}>
             {errorMessages.length > 0 && (
               <Alert severity="error" sx={{ mb: 3 }}>
                 <ul style={{ margin: 0, paddingLeft: '1.2rem' }}>
@@ -260,55 +290,171 @@ function App() {
               {isMapping ? `Processing: ${progressMsg}` : 'Map to Representatives'}
             </Button>
           </CardContent>
-        </Card>
+            </Card>
+          </Grid>
 
-        {results && (
-          <Box mt={6}>
-            <Typography variant="h5" fontWeight="600" mb={3} sx={{ color: '#e2e8f0' }}>Mapping Dashboard</Typography>
-            <TableContainer component={Paper} elevation={4} sx={{ borderRadius: 3, bg: 'background.paper' }}>
-              <Table aria-label="mapping results table">
-                <TableHead sx={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Query Name</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Cluster Hit</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Identity (%)</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Query Cov (%)</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Target Cov (%)</TableCell>
-                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>Status</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {results.map((row, idx) => (
-                    <TableRow key={idx} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
-                      <TableCell component="th" scope="row" sx={{ fontFamily: 'monospace' }}>
-                        {row.id}
-                      </TableCell>
-                      <TableCell>{row.reference}</TableCell>
-                      <TableCell align="right">{row.pident}</TableCell>
-                      <TableCell align="right">{row.qCov}</TableCell>
-                      <TableCell align="right">{row.tCov}</TableCell>
-                      <TableCell align="center">
-                        <Chip
-                          label={row.status}
-                          color={row.status === 'Mapped' ? 'success' : 'error'}
-                          variant="filled"
+          {results && (
+            <Grid item xs={12} md={6}>
+              <Box mb={4}>
+                <Typography variant="h5" fontWeight="600" mb={3} sx={{ color: '#e2e8f0' }}>Mapping Dashboard</Typography>
+                <TableContainer component={Paper} elevation={4} sx={{ borderRadius: 3, bg: 'background.paper' }}>
+                  <Table aria-label="mapping results table" size="small">
+                    <TableHead sx={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Query Name</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Cluster Hit</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>Identity (%)</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>Query Cov (%)</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>Target Cov (%)</TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 'bold' }}>Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {results.map((row, idx) => (
+                        <TableRow key={idx} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                          <TableCell component="th" scope="row" sx={{ fontFamily: 'monospace' }}>
+                            {row.id}
+                          </TableCell>
+                          <TableCell>
+                            {row.reference !== 'N/A' && row.status === 'Mapped' ? (
+                              <Link
+                                component="button"
+                                variant="body2"
+                                onClick={() => setSelectedCluster(row.reference)}
+                                sx={{ textAlign: 'left', fontWeight: 'bold' }}
+                                underline="hover"
+                              >
+                                {row.reference}
+                              </Link>
+                            ) : (
+                              row.reference
+                            )}
+                          </TableCell>
+                          <TableCell align="right">{row.pident}</TableCell>
+                          <TableCell align="right">{row.qCov}</TableCell>
+                          <TableCell align="right">{row.tCov}</TableCell>
+                          <TableCell align="center">
+                            <Chip
+                              label={row.status}
+                              color={row.status === 'Mapped' ? 'success' : 'error'}
+                              variant="filled"
+                              size="small"
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {results.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                            No results generated.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+
+              {selectedCluster && clusterData && clusterData[selectedCluster] && (
+                <React.Fragment>
+                  <Card elevation={4} sx={{ borderRadius: 3 }}>
+                    <CardContent>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                        <Typography variant="h6" fontWeight="bold">
+                          Cluster: {selectedCluster}
+                        </Typography>
+                        <Button
+                          variant="outlined"
                           size="small"
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {results.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                        No results generated.
-                      </TableCell>
-                    </TableRow>
+                          startIcon={<DownloadIcon />}
+                          component="a"
+                          href={`${import.meta.env.BASE_URL || '/'}cluster_fastas/${selectedCluster}.fasta`}
+                          download={`${selectedCluster}.fasta`}
+                        >
+                          FASTA Download
+                        </Button>
+                      </Box>
+                      <Divider sx={{ mb: 2 }} />
+                      <Grid container spacing={2} mb={2}>
+                        <Grid item xs={6}>
+                          <Typography variant="body2" color="text.secondary">Unique Sequences</Typography>
+                          <Typography variant="body1" fontWeight="bold">{clusterData[selectedCluster].unique_seq_count}</Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="body2" color="text.secondary">Unique Samples</Typography>
+                          <Typography variant="body1" fontWeight="bold">{clusterData[selectedCluster].unique_samples_count}</Typography>
+                        </Grid>
+                      </Grid>
+
+                      <Typography variant="body2" color="text.secondary" mb={1}>Associated DOIs</Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                        {clusterData[selectedCluster].paper_dois?.map((doi, index) => {
+                          const cleanDoi = doi.trim();
+                          return (
+                            <Chip
+                              key={index}
+                              label={cleanDoi}
+                              component="a"
+                              href={`https://doi.org/${cleanDoi}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              clickable
+                              color="primary"
+                              variant="outlined"
+                              size="small"
+                            />
+                          );
+                        })}
+                      </Box>
+                    </CardContent>
+                  </Card>
+
+                  {clusterData[selectedCluster].sample_locations && (
+                    <Box mt={3}>
+                      <Typography variant="h6" fontWeight="600" mb={1} sx={{ color: '#e2e8f0' }}>Sample Distribution Map</Typography>
+                      <Card elevation={4} sx={{ borderRadius: 3, overflow: 'hidden', backgroundColor: 'background.paper' }}>
+                        <ComposableMap
+                          projection="geoEquirectangular"
+                          projectionConfig={{ scale: 125 }}
+                          width={800}
+                          height={380}
+                          style={{ width: "100%", height: "auto" }}
+                        >
+                          <Geographies geography={`${import.meta.env.BASE_URL || '/'}countries-110m.json`}>
+                            {({ geographies }) =>
+                              geographies.map((geo) => (
+                                <Geography
+                                  key={geo.rsmKey}
+                                  geography={geo}
+                                  fill="#94a3b8"
+                                  stroke="#cbd5e1"
+                                  strokeWidth={0.3}
+                                  style={{
+                                    default: { outline: "none" },
+                                    hover: { outline: "none" },
+                                    pressed: { outline: "none" },
+                                  }}
+                                />
+                              ))
+                            }
+                          </Geographies>
+                          {clusterData[selectedCluster].sample_locations.map((loc, idx) => {
+                            const [lat, lng] = loc;
+                            return (
+                              <Marker key={idx} coordinates={[lng, lat]}>
+                                <circle r={4} fill="#42c74dff" stroke="#fff" strokeWidth={1} opacity={0.8} />
+                              </Marker>
+                            );
+                          })}
+                        </ComposableMap>
+                      </Card>
+                    </Box>
                   )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-        )}
+                </React.Fragment>
+              )}
+            </Grid>
+          )}
+        </Grid>
       </Container>
     </ThemeProvider>
   );
