@@ -52,57 +52,90 @@ function App() {
   const [isMapping, setIsMapping] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
   const [results, setResults] = useState(null);
-  const [errorText, setErrorText] = useState('');
+  const [errorMessages, setErrorMessages] = useState([]);
 
   const parseFasta = (text) => {
     const sequences = [];
+    const errors = [];
     let currentId = '';
     let currentSeq = '';
-    
+
+    // Includes standard DNA (ACGT), RNA (U), and IUPAC ambiguity codes
+    const iupacRegex = /^[ACGTRYSWKMBDHVN]+$/;
+
+    const saveEntry = () => {
+      if (!currentId) return;
+
+      const cleanedSeq = currentSeq.replace(/\s/g, '');
+      if (cleanedSeq.length > 0 && !iupacRegex.test(cleanedSeq)) {
+        errors.push(`Invalid characters in sequence: ${currentId}. Allowed nucleotides: ACGTRYSWKMBDHVN`);
+      }
+
+      sequences.push({ id: currentId, seq: cleanedSeq });
+    };
+
     const lines = text.split('\n');
     for (const line of lines) {
-      if (line.startsWith('>')) {
-        if (currentId) sequences.push({ id: currentId, seq: currentSeq });
-        currentId = line.substring(1).trim();
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      if (trimmed.startsWith('>')) {
+        saveEntry();
+        currentId = trimmed.substring(1).trim();
         currentSeq = '';
       } else {
-        currentSeq += line.trim().toUpperCase();
+        currentSeq += trimmed.toUpperCase();
       }
     }
-    if (currentId) sequences.push({ id: currentId, seq: currentSeq });
-    return sequences;
+
+    saveEntry();
+    return { sequences, errors };
   };
 
   const handleMap = async () => {
-    setErrorText('');
+    setErrorMessages([]);
     setResults(null);
-    
-    const parsed = parseFasta(inputSequences);
-    if (parsed.length === 0) {
-      setErrorText('No valid FASTA sequence found. Please ensure it starts with ">".');
-      return;
+
+    const { sequences, errors: parsingErrors } = parseFasta(inputSequences);
+    const validationErrors = [...parsingErrors];
+
+    if (sequences.length === 0 && validationErrors.length === 0) {
+      validationErrors.push('No valid FASTA sequence found. Please ensure it starts with ">".');
     }
-    if (parsed.length > 10) {
-      setErrorText('Maximum of 10 sequences allowed.');
-      return;
-    }
-    for (const p of parsed) {
-      if (p.seq.length > 2000) {
-        setErrorText(`Sequence ${p.id} exceeds 2000 bp limit.`);
-        return;
+
+    const ids = new Set();
+    for (const p of sequences) {
+      if (ids.has(p.id)) {
+        validationErrors.push(`Duplicate ID found: ${p.id}`);
       }
+      ids.add(p.id);
+    }
+
+    if (sequences.length > 10) {
+      validationErrors.push('Maximum of 10 sequences allowed.');
+    }
+
+    for (const p of sequences) {
+      if (p.seq.length > 2000) {
+        validationErrors.push(`Sequence ${p.id} exceeds 2000 bp limit. This service focuses on ITS2 region only.`);
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      setErrorMessages(validationErrors);
+      return;
     }
 
     setIsMapping(true);
     setProgressMsg('Initializing Minimap2 module...');
-    
+
     try {
       // Initialize Aioli and Minimap2
       const CLI = await new Aioli({
         tool: 'minimap2',
         version: '2.22'
       });
-      
+
       setProgressMsg('Fetching reference centroids...');
       // In Vite, to fetch something from public dir, we just use the root relative url or base url
       // Since it's deployed to /MortiMap/, Vite handles relative paths if we use import.meta.env.BASE_URL
@@ -110,35 +143,36 @@ function App() {
       const refRes = await fetch(`${base}references.fasta`);
       if (!refRes.ok) throw new Error('Could not load references.fasta');
       const refText = await refRes.text();
-      
+
       setProgressMsg('Aligning sequences...');
       await CLI.fs.writeFile('references.fasta', refText);
       await CLI.fs.writeFile('query.fasta', inputSequences);
-      
+
       // Execute minimap2 on short reads (-x sr), outputting PAF format
-      const output = await CLI.exec('minimap2 -x sr references.fasta query.fasta');
-      
+      const output = await CLI.exec('minimap2 -k 10 -w 1 -N 0 references.fasta query.fasta');
+
       setProgressMsg('Parsing results...');
-      
+
       // Parse output format PAF
       // Columns: query_name, query_len, q_start, q_end, strand, target_name, target_len, t_start, t_end, matches, align_len, mapq
+      console.log(output);
       const lines = output.split('\n').filter(l => l.trim().length > 0 && !l.startsWith('['));
-      
+
       const parsedResults = lines.map(line => {
         const cols = line.split('\t');
         if (cols.length < 12) return null;
-        
+
         const qName = cols[0];
         const qLen = parseInt(cols[1]);
         const tName = cols[5];
         const tLen = parseInt(cols[6]);
         const matches = parseInt(cols[9]);
         const alignLen = parseInt(cols[10]);
-        
+
         const pident = (matches / alignLen) * 100;
         const qCov = (alignLen / qLen) * 100;
         const tCov = (alignLen / tLen) * 100;
-        
+
         const bidirectionalCoverageOk = (qCov >= COVERAGE_THRESHOLD) && (tCov >= COVERAGE_THRESHOLD);
         const pidentOk = pident >= PIDENT_THRESHOLD;
         const mapped = bidirectionalCoverageOk && pidentOk;
@@ -152,13 +186,13 @@ function App() {
           status: mapped ? 'Mapped' : 'Unmapped'
         };
       }).filter(Boolean);
-      
+
       // Handle sequences that had zero alignments
-      const allIds = parsed.map(p => p.id);
+      const allIds = sequences.map(p => p.id);
       const mappedIds = new Set(parsedResults.map(p => p.id));
-      
+
       const finalList = [...parsedResults];
-      
+
       // Add unmapped back in manually if Minimap returned nothing for them
       for (const id of allIds) {
         if (!mappedIds.has(id)) {
@@ -177,7 +211,7 @@ function App() {
 
     } catch (err) {
       console.error(err);
-      setErrorText('Mapping failed. Check console for details: ' + err.message);
+      setErrorMessages(['Mapping failed. Check console for details: ' + err.message]);
     } finally {
       setIsMapping(false);
     }
@@ -209,14 +243,20 @@ function App() {
 
         <Card elevation={4} sx={{ mb: 4, borderRadius: 3 }}>
           <CardContent sx={{ p: 4 }}>
-            {errorText && (
-              <Alert severity="error" sx={{ mb: 3 }}>{errorText}</Alert>
+            {errorMessages.length > 0 && (
+              <Alert severity="error" sx={{ mb: 3 }}>
+                <ul style={{ margin: 0, paddingLeft: '1.2rem' }}>
+                  {errorMessages.map((msg, index) => (
+                    <li key={index}>{msg}</li>
+                  ))}
+                </ul>
+              </Alert>
             )}
-            
+
             <TextField
               label="Input DNA Sequences (FASTA)"
               multiline
-              rows={8}
+              rows={2}
               fullWidth
               variant="outlined"
               value={inputSequences}
@@ -224,7 +264,7 @@ function App() {
               placeholder="Paste up to 10 sequences in FASTA format here (max 2000 bp each)..."
               sx={{ fontFamily: 'monospace', mb: 3 }}
             />
-            
+
             <Button
               variant="contained"
               size="large"
@@ -265,11 +305,11 @@ function App() {
                       <TableCell align="right">{row.qCov}</TableCell>
                       <TableCell align="right">{row.tCov}</TableCell>
                       <TableCell align="center">
-                        <Chip 
-                          label={row.status} 
-                          color={row.status === 'Mapped' ? 'success' : 'error'} 
-                          variant="filled" 
-                          size="small" 
+                        <Chip
+                          label={row.status}
+                          color={row.status === 'Mapped' ? 'success' : 'error'}
+                          variant="filled"
+                          size="small"
                         />
                       </TableCell>
                     </TableRow>
