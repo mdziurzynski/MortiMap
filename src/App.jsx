@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Aioli from '@biowasm/aioli';
+import { parseFasta, selectBestHits } from './utils';
 import {
   Container,
   Typography,
@@ -44,8 +45,8 @@ const darkTheme = createTheme({
   },
 });
 
-const PIDENT_THRESHOLD = 90; // Ex: 90% identity required
-const COVERAGE_THRESHOLD = 70; // Ex: 70% coverage required on both sequences
+const PIDENT_THRESHOLD = 98; // Ex: 90% identity required
+const COVERAGE_THRESHOLD = 99; // Ex: 70% coverage required on both sequences
 
 function App() {
   const [inputSequences, setInputSequences] = useState('>query_1\nCGCATCGATGAAGAACGCAGCGAAATGCGATAAGTAATGTGAATTGCAGAATTCAGTGAATCATCGAATCTTTGAACGCACATTGCGCCCCTTGGTATTCC');
@@ -54,43 +55,7 @@ function App() {
   const [results, setResults] = useState(null);
   const [errorMessages, setErrorMessages] = useState([]);
 
-  const parseFasta = (text) => {
-    const sequences = [];
-    const errors = [];
-    let currentId = '';
-    let currentSeq = '';
 
-    // Includes standard DNA (ACGT), RNA (U), and IUPAC ambiguity codes
-    const iupacRegex = /^[ACGTRYSWKMBDHVN]+$/;
-
-    const saveEntry = () => {
-      if (!currentId) return;
-
-      const cleanedSeq = currentSeq.replace(/\s/g, '');
-      if (cleanedSeq.length > 0 && !iupacRegex.test(cleanedSeq)) {
-        errors.push(`Invalid characters in sequence: ${currentId}. Allowed nucleotides: ACGTRYSWKMBDHVN`);
-      }
-
-      sequences.push({ id: currentId, seq: cleanedSeq });
-    };
-
-    const lines = text.split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      if (trimmed.startsWith('>')) {
-        saveEntry();
-        currentId = trimmed.substring(1).trim();
-        currentSeq = '';
-      } else {
-        currentSeq += trimmed.toUpperCase();
-      }
-    }
-
-    saveEntry();
-    return { sequences, errors };
-  };
 
   const handleMap = async () => {
     setErrorMessages([]);
@@ -136,7 +101,7 @@ function App() {
         version: '2.22'
       });
 
-      setProgressMsg('Fetching reference centroids...');
+      setProgressMsg('Fetching reference sequences...');
       // In Vite, to fetch something from public dir, we just use the root relative url or base url
       // Since it's deployed to /MortiMap/, Vite handles relative paths if we use import.meta.env.BASE_URL
       const base = import.meta.env.BASE_URL || '/';
@@ -146,10 +111,20 @@ function App() {
 
       setProgressMsg('Aligning sequences...');
       await CLI.fs.writeFile('references.fasta', refText);
-      await CLI.fs.writeFile('query.fasta', inputSequences);
+
+      // Minimap2 truncates sequence IDs at the first whitespace.
+      // To preserve full IDs, we map them to safe internal IDs and translate back later.
+      const idMap = {};
+      const safeQueryFasta = sequences.map((s, idx) => {
+        const safeId = `seq_${idx}`;
+        idMap[safeId] = s.id;
+        return `>${safeId}\n${s.seq}`;
+      }).join('\n');
+
+      await CLI.fs.writeFile('query.fasta', safeQueryFasta);
 
       // Execute minimap2 on short reads (-x sr), outputting PAF format
-      const output = await CLI.exec('minimap2 -k 10 -w 1 -N 0 references.fasta query.fasta');
+      const output = await CLI.exec('minimap2 -k 10 -w 1 -N 5 references.fasta query.fasta');
 
       setProgressMsg('Parsing results...');
 
@@ -158,11 +133,12 @@ function App() {
       console.log(output);
       const lines = output.split('\n').filter(l => l.trim().length > 0 && !l.startsWith('['));
 
-      const parsedResults = lines.map(line => {
+      const allAlignments = lines.map(line => {
         const cols = line.split('\t');
         if (cols.length < 12) return null;
 
-        const qName = cols[0];
+        const qIdSafe = cols[0];
+        const qName = idMap[qIdSafe] || qIdSafe;
         const qLen = parseInt(cols[1]);
         const tName = cols[5];
         const tLen = parseInt(cols[6]);
@@ -173,39 +149,43 @@ function App() {
         const qCov = (alignLen / qLen) * 100;
         const tCov = (alignLen / tLen) * 100;
 
-        const bidirectionalCoverageOk = (qCov >= COVERAGE_THRESHOLD) && (tCov >= COVERAGE_THRESHOLD);
-        const pidentOk = pident >= PIDENT_THRESHOLD;
-        const mapped = bidirectionalCoverageOk && pidentOk;
-
         return {
           id: qName,
           reference: tName,
-          pident: pident.toFixed(1),
-          qCov: qCov.toFixed(1),
-          tCov: tCov.toFixed(1),
-          status: mapped ? 'Mapped' : 'Unmapped'
+          pidentNum: pident,
+          qCovNum: qCov,
+          tCovNum: tCov,
         };
       }).filter(Boolean);
 
-      // Handle sequences that had zero alignments
-      const allIds = sequences.map(p => p.id);
-      const mappedIds = new Set(parsedResults.map(p => p.id));
+      const bestHitsMap = selectBestHits(allAlignments);
 
-      const finalList = [...parsedResults];
-
-      // Add unmapped back in manually if Minimap returned nothing for them
-      for (const id of allIds) {
-        if (!mappedIds.has(id)) {
-          finalList.push({
-            id: id,
-            reference: 'N/A',
-            pident: '0.0',
-            qCov: '0.0',
-            tCov: '0.0',
-            status: 'Unmapped'
-          });
+      // Generate final results list based on all queried sequences
+      const finalList = sequences.map(s => {
+        const bestHit = bestHitsMap.get(s.id);
+        if (bestHit) {
+          const mapped = (bestHit.pidentNum >= PIDENT_THRESHOLD) &&
+            (bestHit.qCovNum >= COVERAGE_THRESHOLD) &&
+            (bestHit.tCovNum >= COVERAGE_THRESHOLD);
+          return {
+            id: s.id,
+            reference: bestHit.reference,
+            pident: bestHit.pidentNum.toFixed(1),
+            qCov: bestHit.qCovNum.toFixed(1),
+            tCov: bestHit.tCovNum.toFixed(1),
+            status: mapped ? 'Mapped' : 'Unmapped'
+          };
         }
-      }
+        // Case where sequence had zero alignments
+        return {
+          id: s.id,
+          reference: 'N/A',
+          pident: '0.0',
+          qCov: '0.0',
+          tCov: '0.0',
+          status: 'Unmapped'
+        };
+      });
 
       setResults(finalList);
 
@@ -237,7 +217,10 @@ function App() {
             MortiMap
           </Typography>
           <Typography variant="subtitle1" color="text.secondary">
-            Map sequences to ITS2 Centroids using Minimap2 right in your browser.
+            Map your ITS2 sequences to representative sequences of <i>Mortierellacea</i> dark taxa clusters.
+          </Typography>
+          <Typography variant="subtitle1" color="text.secondary">
+            Cite our paper: <i>Dziurzynski et al. 2026</i>
           </Typography>
         </Box>
 
@@ -274,7 +257,7 @@ function App() {
               fullWidth
               sx={{ py: 1.5, borderRadius: 2, fontWeight: 'bold' }}
             >
-              {isMapping ? `Processing: ${progressMsg}` : 'Map to Centroids'}
+              {isMapping ? `Processing: ${progressMsg}` : 'Map to Representatives'}
             </Button>
           </CardContent>
         </Card>
@@ -287,7 +270,7 @@ function App() {
                 <TableHead sx={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
                   <TableRow>
                     <TableCell sx={{ fontWeight: 'bold' }}>Query Name</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Centroid Hit</TableCell>
+                    <TableCell sx={{ fontWeight: 'bold' }}>Cluster Hit</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 'bold' }}>Identity (%)</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 'bold' }}>Query Cov (%)</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 'bold' }}>Target Cov (%)</TableCell>

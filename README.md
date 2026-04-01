@@ -12,15 +12,15 @@ MortiMap accepts up to **10 DNA sequences** (max 2000 bp each) in FASTA format a
 | Column | Description |
 |---|---|
 | Query Name | FASTA header of the input sequence |
-| Centroid Hit | ID of the matched reference sequence |
+| Cluster Hit | ID of the matched reference sequence |
 | Identity (%) | Percentage of matching bases in the aligned block |
 | Query Cov (%) | Proportion of the query covered by the alignment |
 | Target Cov (%) | Proportion of the reference covered by the alignment |
 | Status | `Mapped` / `Unmapped` based on predefined thresholds |
 
 A sequence is considered **Mapped** only if it meets **both** thresholds simultaneously:
-- **Identity ≥ 90%** (`PIDENT_THRESHOLD`)
-- **Bidirectional coverage ≥ 70%** (`COVERAGE_THRESHOLD`) — applied independently to both query and target
+- **Identity ≥ 98%** (`PIDENT_THRESHOLD`)
+- **Bidirectional coverage ≥ 99%** (`COVERAGE_THRESHOLD`) — applied independently to both query and target
 
 ---
 
@@ -31,6 +31,7 @@ A sequence is considered **Mapped** only if it meets **both** thresholds simulta
 | Frontend framework | [React 18](https://reactjs.org/) via [Vite 5](https://vitejs.dev/) |
 | UI components | [Material UI v5](https://mui.com/) |
 | Alignment engine | [Minimap2 2.22](https://github.com/lh3/minimap2) via [BioWasm / Aioli](https://biowasm.com/) |
+| Test framework | [Vitest](https://vitest.dev/) |
 | Deployment | [GitHub Pages](https://pages.github.com/) via GitHub Actions |
 
 All alignment runs inside a WebAssembly sandbox in the user's browser — no data leaves the client.
@@ -82,7 +83,40 @@ npm run dev
 
 The app will be available at **http://localhost:5173/MortiMap/**
 
-> **Note:** The first time you click "Map to Centroids", the browser will download the Minimap2 WebAssembly binary from BioWasm CDN (~10 MB). Subsequent runs within the same session are faster.
+> **Note:** The first time you click "Map to Representatives", the browser will download the Minimap2 WebAssembly binary from BioWasm CDN (~10 MB). Subsequent runs within the same session are faster.
+
+---
+
+## Testing
+
+MortiMap uses **[Vitest](https://vitest.dev/)** for unit and integration testing. Logic is decoupled from the UI in `src/utils.js` for easy testability.
+
+### 🏃 Running Tests
+
+To run the full test suite once:
+```bash
+npm test
+```
+
+To run tests in watch mode (auto-rerun on changes):
+```bash
+npx vitest
+```
+
+### ✍️ Writing New Tests
+
+Tests are located in `src/utils.test.js`. 
+
+- **Unit Tests**: Add tests to the `parseFasta` or `selectBestHits` blocks to verify core logic (e.g., new IUPAC characters or ranking criteria).
+- **Mapping Scenarios**: Add mock alignment data to the `Mapping Scenarios` block to simulate how the system should handle specific reference hits without needing to run the full WebAssembly engine.
+
+Example test for a new utility:
+```js
+it('should do something correctly', () => {
+  const result = myNewUtility(input);
+  expect(result).toBe(expected);
+});
+```
 
 ---
 
@@ -106,8 +140,8 @@ Up to ~1000 sequences are supported. There is no server-side processing — the 
 The mapping thresholds are defined as constants at the top of `src/App.jsx`:
 
 ```js
-const PIDENT_THRESHOLD = 90;   // Minimum % identity to consider a hit valid
-const COVERAGE_THRESHOLD = 70; // Minimum % coverage required on both query and target
+const PIDENT_THRESHOLD = 98;   // Minimum % identity to consider a hit valid
+const COVERAGE_THRESHOLD = 99; // Minimum % coverage required on both query and target
 ```
 
 Modify these values and save the file. The dev server will hot-reload automatically.
