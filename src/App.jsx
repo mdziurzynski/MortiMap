@@ -57,7 +57,7 @@ const PIDENT_THRESHOLD = 98; // Ex: 90% identity required
 const COVERAGE_THRESHOLD = 99; // Ex: 70% coverage required on both sequences
 
 function App() {
-  const [inputSequences, setInputSequences] = useState('>example1\nAACATCTCAAACCTCTCGACACTTGCGTTTGAGAGGATTGGATTTGAGCGATCCCGACTCCTTCGCCAGAAAGAGGAGGGTCGCTTGAAATGCAGATGCAGCAGGACATTCTTCTGAGCTAAAAGCATATTTATTTAGTCCCGTCAAACGGATTATTACTTTTGCTTCAGCTAACATAAAAGGTTGAATGAGCCATTATCGCTGATTGCAGGAAAACACGTCCGTAACAGGACTTGTAA\n>example2\nAACATCTCAAACCTCTCGACACTTGCGTTTGAGAGGATTGGATTTGAGCGATCCCGACTCCTTCGCCAGAAAGAGGAGGGTCGCTTGAAATGCAGATGCAGCAGGACATTCTTCTGAGCTAAAAGCATATTTATTTAGTCCCGTCAAACGGATTATTACTTTTGCTTCAGCTAACATAAAAGGTTGAATGAGCCATTATCGCTGATTGCAG');
+  const [inputSequences, setInputSequences] = useState('>example_1\nAACATCTCAAACCTTTCAGCGCTTGCGTTCGAGAGGATTGGATTTGAGCGATCCCGACTCCTTCATCAGAAAGAGGAGGGTCGCTTGAAATGCAGATGCAGCAGGACATTCTTCTGAGCTAAAAGCATATTTATTTAGTCCCGTCAAACGGATTATTACTTTTGCTTCAGCTAACATAAAGGTCGAATGAACCACTATCGCTGATTGCAGGAAAACAATGTCCCTTAAAACAGGACTTTGTAA\n>example_2\nAACACCTCAAAGCCTTTTTTCTTTTTTTGAAGAAAGACTTTGGACTTGAGCAATCCCAACACTATCTCTTGAGATTGGGGGCGGGTTGCTTGAAATGCAGGTGCAGCTGGACTTTCTCCTGAGCTAAAAGCATATTCATTTAGTCCCGTCAAACGGATTATTACTTTTGCTGCAGCTAACATAAAGGGAGTTTGACCATTTTGGCTGACTGATGCAGGATTTTCACAAGAGTCTTCAAAAACCCTTGTTAA');
   const [isMapping, setIsMapping] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
   const [results, setResults] = useState(null);
@@ -248,7 +248,7 @@ function App() {
             Map your ITS2 sequences to representative sequences of <i>Mortierellacea</i> dark taxa clusters.
           </Typography>
           <Typography variant="subtitle1" color="text.secondary">
-            Cite our paper: <i>Dziurzynski et al. 2026</i>
+            For details, check out our paper: <i>Dziurzynski et al. 2026</i>
           </Typography>
         </Box>
 
@@ -297,6 +297,9 @@ function App() {
             <Grid item xs={12} md={6}>
               <Box mb={4}>
                 <Typography variant="h5" fontWeight="600" mb={3} sx={{ color: '#e2e8f0' }}>Mapping Dashboard</Typography>
+                <Typography variant="subtitle1" color="text.secondary">
+                  Only hits with &gt;98% identity and &gt;99% bidirectional coverage are considered correct matches.
+                </Typography>
                 <TableContainer component={Paper} elevation={4} sx={{ borderRadius: 3, bg: 'background.paper' }}>
                   <Table aria-label="mapping results table" size="small">
                     <TableHead sx={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
@@ -411,7 +414,7 @@ function App() {
 
                   {clusterData[selectedCluster].sample_locations && (
                     <Box mt={3}>
-                      <Typography variant="h6" fontWeight="600" mb={1} sx={{ color: '#e2e8f0' }}>Sample Distribution Map</Typography>
+                      <Typography variant="h6" fontWeight="600" mb={1} sx={{ color: '#e2e8f0' }}>Sample Distribution Map: {selectedCluster}</Typography>
                       <Card elevation={4} sx={{ borderRadius: 3, overflow: 'hidden', backgroundColor: 'background.paper' }}>
                         <ComposableMap
                           projection="geoEquirectangular"
@@ -442,7 +445,7 @@ function App() {
                             const [lat, lng] = loc;
                             return (
                               <Marker key={idx} coordinates={[lng, lat]}>
-                                <circle r={4} fill="#42c74dff" stroke="#fff" strokeWidth={1} opacity={0.8} />
+                                <circle r={4} fill="#f77e05" stroke="#fff" strokeWidth={1} opacity={0.8} />
                               </Marker>
                             );
                           })}
