@@ -2,7 +2,7 @@
 
 A browser-based DNA sequence mapping tool that aligns user-provided sequences against a reference database of ITS2 centroid sequences — no server required. All computation runs locally in your browser via WebAssembly.
 
-Goto: (https://mdziurzynski.github.io/MortiMap/)[https://mdziurzynski.github.io/MortiMap/]
+Goto: [https://mdziurzynski.github.io/MortiMap/](https://mdziurzynski.github.io/MortiMap/)
 
 ---
 
