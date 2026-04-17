@@ -1,4 +1,4 @@
-export const iupacRegex = /^[ACGTRYSWKMBDHVN]+$/;
+export const dnaRegex = /^[ACGTN]+$/;
 
 /**
  * Parses FASTA formatted text into an array of objects.
@@ -16,8 +16,8 @@ export const parseFasta = (text) => {
 
     // Remove any whitespaces/tabs from the internal sequence string
     const cleanedSeq = currentSeq.replace(/\s/g, '');
-    if (cleanedSeq.length > 0 && !iupacRegex.test(cleanedSeq)) {
-      errors.push(`Invalid characters in sequence: ${currentId}. Allowed nucleotides: ACGTRYSWKMBDHVN`);
+    if (cleanedSeq.length > 0 && !dnaRegex.test(cleanedSeq)) {
+      errors.push(`Invalid characters in sequence: ${currentId}. Allowed nucleotides: ACGTN`);
     }
 
     sequences.push({ id: currentId, seq: cleanedSeq });
@@ -54,9 +54,16 @@ export const selectBestHits = (allAlignments) => {
       bestHitsMap.set(hit.id, hit);
     } else {
       const currentBest = bestHitsMap.get(hit.id);
-      const isBetter = hit.pidentNum > currentBest.pidentNum ||
-        (hit.pidentNum === currentBest.pidentNum && hit.qCovNum > currentBest.qCovNum) ||
-        (hit.pidentNum === currentBest.pidentNum && hit.qCovNum === currentBest.qCovNum && hit.tCovNum > currentBest.tCovNum);
+      
+      // Rank primarily by matches (which combines identity and coverage),
+      // then by identity, then by coverage.
+      // This prevents tiny 100% identity matches from outweighing long 99% matches.
+      const currentMatches = currentBest.matches || 0;
+      const hitMatches = hit.matches || 0;
+      
+      const isBetter = hitMatches > currentMatches ||
+        (hitMatches === currentMatches && hit.pidentNum > currentBest.pidentNum) ||
+        (hitMatches === currentMatches && hit.pidentNum === currentBest.pidentNum && hit.qCovNum > currentBest.qCovNum);
 
       if (isBetter) {
         bestHitsMap.set(hit.id, hit);

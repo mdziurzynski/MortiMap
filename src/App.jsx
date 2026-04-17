@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import Aioli from '@biowasm/aioli';
 import { parseFasta, selectBestHits } from './utils';
 import {
   Container,
@@ -27,11 +26,13 @@ import {
   List,
   ListItem,
   ListItemText,
-  Divider
+  Divider,
+  Tooltip
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ScienceIcon from '@mui/icons-material/Science';
 import DownloadIcon from '@mui/icons-material/Download';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
 
 const darkTheme = createTheme({
@@ -69,7 +70,7 @@ function App() {
     const fetchClusterData = async () => {
       try {
         const base = import.meta.env.BASE_URL || '/';
-        const res = await fetch(`${base}cluster_data.json`);
+        const res = await fetch(`${base}cluster_data.with_sh_matching.json`);
         if (res.ok) {
           const data = await res.json();
           setClusterData(data);
@@ -88,6 +89,7 @@ function App() {
   const handleMap = async () => {
     setErrorMessages([]);
     setResults(null);
+    setSelectedCluster(null);
 
     const { sequences, errors: parsingErrors } = parseFasta(inputSequences);
     const validationErrors = [...parsingErrors];
@@ -123,70 +125,48 @@ function App() {
     setProgressMsg('Initializing Minimap2 module...');
 
     try {
-      // Initialize Aioli and Minimap2
-      const CLI = await new Aioli({
-        tool: 'minimap2',
-        version: '2.22'
-      });
-
+      // Fetch references
       setProgressMsg('Fetching reference sequences...');
-      // In Vite, to fetch something from public dir, we just use the root relative url or base url
-      // Since it's deployed to /MortiMap/, Vite handles relative paths if we use import.meta.env.BASE_URL
       const base = import.meta.env.BASE_URL || '/';
       const refRes = await fetch(`${base}references.fasta`);
       if (!refRes.ok) throw new Error('Could not load references.fasta');
       const refText = await refRes.text();
+      
+      // We parse the references FASTA text so we can pass it to the worker
+      const refFasta = parseFasta(refText);
+      if (refFasta.errors && refFasta.errors.length > 0) {
+        console.warn('Errors while parsing references.fasta:', refFasta.errors);
+      }
 
       setProgressMsg('Aligning sequences...');
-      await CLI.fs.writeFile('references.fasta', refText);
-
-      // Minimap2 truncates sequence IDs at the first whitespace.
-      // To preserve full IDs, we map them to safe internal IDs and translate back later.
-      const idMap = {};
-      const safeQueryFasta = sequences.map((s, idx) => {
-        const safeId = `seq_${idx}`;
-        idMap[safeId] = s.id;
-        return `>${safeId}\n${s.seq}`;
-      }).join('\n');
-
-      await CLI.fs.writeFile('query.fasta', safeQueryFasta);
-
-      // Execute minimap2 on short reads (-x sr), outputting PAF format
-      const output = await CLI.exec('minimap2 -k 10 -w 1 -N 5 references.fasta query.fasta');
+      
+      const mapperWorker = new Worker(new URL('./mapper.worker.js', import.meta.url), { type: 'module' });
+      
+      const allAlignments = await new Promise((resolve, reject) => {
+        mapperWorker.onmessage = (e) => {
+          if (e.data.error) reject(new Error(e.data.error));
+          else resolve(e.data.alignments);
+          mapperWorker.terminate();
+        };
+        mapperWorker.onerror = (e) => {
+          reject(e);
+          mapperWorker.terminate();
+        };
+        mapperWorker.postMessage({ queries: sequences, references: refFasta.sequences });
+      });
 
       setProgressMsg('Parsing results...');
 
-      // Parse output format PAF
-      // Columns: query_name, query_len, q_start, q_end, strand, target_name, target_len, t_start, t_end, matches, align_len, mapq
-      console.log(output);
-      const lines = output.split('\n').filter(l => l.trim().length > 0 && !l.startsWith('['));
+      const mappedAlignments = allAlignments.map(hit => ({
+        id: hit.queryId,
+        reference: hit.targetId,
+        pidentNum: hit.identity * 100,
+        qCovNum: hit.qcov * 100,
+        tCovNum: hit.tcov * 100,
+        matches: hit.matches,
+      }));
 
-      const allAlignments = lines.map(line => {
-        const cols = line.split('\t');
-        if (cols.length < 12) return null;
-
-        const qIdSafe = cols[0];
-        const qName = idMap[qIdSafe] || qIdSafe;
-        const qLen = parseInt(cols[1]);
-        const tName = cols[5];
-        const tLen = parseInt(cols[6]);
-        const matches = parseInt(cols[9]);
-        const alignLen = parseInt(cols[10]);
-
-        const pident = (matches / alignLen) * 100;
-        const qCov = (alignLen / qLen) * 100;
-        const tCov = (alignLen / tLen) * 100;
-
-        return {
-          id: qName,
-          reference: tName,
-          pidentNum: pident,
-          qCovNum: qCov,
-          tCovNum: tCov,
-        };
-      }).filter(Boolean);
-
-      const bestHitsMap = selectBestHits(allAlignments);
+      const bestHitsMap = selectBestHits(mappedAlignments);
 
       // Generate final results list based on all queried sequences
       const finalList = sequences.map(s => {
@@ -388,6 +368,48 @@ function App() {
                           <Typography variant="body1" fontWeight="bold">{clusterData[selectedCluster].unique_samples_count}</Typography>
                         </Grid>
                       </Grid>
+
+                      {clusterData[selectedCluster].shmatching && clusterData[selectedCluster].shmatching.length > 0 && (
+                        <Box mb={2}>
+                          <Box display="flex" alignItems="center" gap={0.5} mb={0.5}>
+                            <Typography variant="body2" color="text.secondary">SH Matching</Typography>
+                            <Tooltip title="Results of SHMatcher run on clusters sequences. List of UNITE Species Hypotheses (SH) and their respective sequence counts from this cluster." placement="top">
+                              <HelpOutlineIcon fontSize="small" color="action" sx={{ fontSize: 16, cursor: 'help' }} />
+                            </Tooltip>
+                          </Box>
+                          <List dense disablePadding sx={{
+                            maxHeight: 108 /* approx 3 items */,
+                            overflowY: 'auto',
+                            bgcolor: 'rgba(0,0,0,0.1)',
+                            borderRadius: 1
+                          }}>
+                            {[...(clusterData[selectedCluster].shmatching || [])]
+                              .sort((a, b) => b[1] - a[1]) // Sort descending by sequences
+                              .map(([sh, count], idx) => {
+                                const isSH = sh.startsWith('SH');
+                                return (
+                                  <ListItem key={idx} sx={{ py: 0.5 }}>
+                                    <ListItemText
+                                      primary={
+                                        <Box display="flex" justifyContent="space-between" alignItems="center">
+                                          {isSH ? (
+                                            <Link href={`https://unite.ut.ee/sh/${sh}`} target="_blank" rel="noopener noreferrer" underline="hover">
+                                              {sh}
+                                            </Link>
+                                          ) : (
+                                            <Typography variant="body2">{sh}</Typography>
+                                          )}
+                                          <Chip label={`${count} seqs`} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+                                        </Box>
+                                      }
+                                      disableTypography
+                                    />
+                                  </ListItem>
+                                );
+                              })}
+                          </List>
+                        </Box>
+                      )}
 
                       <Typography variant="body2" color="text.secondary" mb={1}>Associated DOIs</Typography>
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>

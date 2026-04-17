@@ -26,11 +26,11 @@ describe('parseFasta', () => {
     expect(sequences[0].seq).toBe('ATGCATGC');
   });
 
-  it('detects invalid IUPAC characters', () => {
-    const input = '>seq1\nATG Z'; // 'Z' is not valid in IUPAC DNA/RNA
+  it('detects invalid DNA characters', () => {
+    const input = '>seq1\nATGR'; // 'R' is not valid in our restricted set (ACGTN)
     const { errors } = parseFasta(input);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain('Invalid characters');
+    expect(errors[0]).toContain('Allowed nucleotides: ACGTN');
   });
 
   it('handles trailing spaces in header correctly', () => {
@@ -53,13 +53,13 @@ describe('selectBestHits', () => {
     expect(best.get('q1').reference).toBe('refA');
   });
 
-  it('ranks by identity primarily', () => {
+  it('ranks by matches primarily', () => {
     const hits = [
-      { id: 'q1', reference: 'refA', pidentNum: 95, qCovNum: 100, tCovNum: 100 },
-      { id: 'q1', reference: 'refB', pidentNum: 98, qCovNum: 50, tCovNum: 50 }
+      { id: 'q1', reference: 'refA', pidentNum: 95, qCovNum: 100, tCovNum: 100, matches: 200 },
+      { id: 'q1', reference: 'refB', pidentNum: 98, qCovNum: 50, tCovNum: 50, matches: 50 }
     ];
     const best = selectBestHits(hits);
-    expect(best.get('q1').reference).toBe('refB');
+    expect(best.get('q1').reference).toBe('refA');
   });
 
   it('ranks by query coverage secondarily', () => {
