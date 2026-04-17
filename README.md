@@ -1,6 +1,6 @@
 # 🔬 MortiMap
 
-A browser-based DNA sequence mapping tool that aligns user-provided sequences against a reference database of ITS2 centroid sequences — no server required. All computation runs locally in your browser via WebAssembly.
+A browser-based DNA sequence mapping tool that aligns user-provided sequences against a reference database of ITS2 centroid sequences - no server required. All computation runs locally in your browser using a custom Needleman-Wunsch alignment algorithm.
 
 Goto: [https://mdziurzynski.github.io/MortiMap/](https://mdziurzynski.github.io/MortiMap/)
 
@@ -8,7 +8,7 @@ Goto: [https://mdziurzynski.github.io/MortiMap/](https://mdziurzynski.github.io/
 
 ## What It Does
 
-MortiMap accepts up to **10 DNA sequences** (max 2000 bp each) in FASTA format and maps them against a curated set of reference centroid sequences using **Minimap2** compiled to WebAssembly via [BioWasm](https://biowasm.com/). It reports which queries successfully cluster with a reference and provides alignment metrics for each hit.
+MortiMap accepts up to **10 DNA sequences** (max 2000 bp each) in FASTA format and maps them against a curated set of reference centroid sequences using a highly optimized **Needleman-Wunsch** (semi-global/end-gap-free) alignment algorithm. It reports which queries successfully cluster with a reference and provides alignment metrics for each hit.
 
 **Results include:**
 | Column | Description |
@@ -22,7 +22,7 @@ MortiMap accepts up to **10 DNA sequences** (max 2000 bp each) in FASTA format a
 
 A sequence is considered **Mapped** only if it meets **both** thresholds simultaneously:
 - **Identity ≥ 98%** (`PIDENT_THRESHOLD`)
-- **Bidirectional coverage ≥ 99%** (`COVERAGE_THRESHOLD`) — applied independently to both query and target
+- **Bidirectional coverage ≥ 99%** (`COVERAGE_THRESHOLD`) - applied independently to both query and target
 
 ---
 
@@ -32,11 +32,11 @@ A sequence is considered **Mapped** only if it meets **both** thresholds simulta
 |---|---|
 | Frontend framework | [React 18](https://reactjs.org/) via [Vite 5](https://vitejs.dev/) |
 | UI components | [Material UI v5](https://mui.com/) |
-| Alignment engine | [Minimap2 2.22](https://github.com/lh3/minimap2) via [BioWasm / Aioli](https://biowasm.com/) |
+| Alignment engine | Custom Needleman-Wunsch (JavaScript / Web Worker) |
 | Test framework | [Vitest](https://vitest.dev/) |
 | Deployment | [GitHub Pages](https://pages.github.com/) via GitHub Actions |
 
-All alignment runs inside a WebAssembly sandbox in the user's browser — no data leaves the client.
+All alignment runs inside a dedicated Web Worker in the user's browser - no data leaves the client.
 
 ---
 
@@ -46,17 +46,18 @@ All alignment runs inside a WebAssembly sandbox in the user's browser — no dat
 MortiMap/
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml          # GitHub Actions — auto-deploy to GitHub Pages on push to main
-├── docs/
-│   └── implementation_plan.md  # Project architecture and design decisions
+│       └── deploy.yml          # GitHub Actions - auto-deploy to GitHub Pages on push to main
 ├── public/
-│   └── references.fasta        # Reference centroid sequences (replace with your real database)
+│   └── references.fasta        # Reference centroid sequences
 ├── src/
 │   ├── App.jsx                 # Main React application component
+│   ├── nwaligner.js            # Core Needleman-Wunsch implementation
+│   ├── mapper.worker.js        # Web Worker for background sequence alignment
+│   ├── utils.js                # Parsing and hit selection utilities
 │   ├── main.jsx                # React entry point
-│   └── index.css               # Global CSS (minimal — MUI handles most styling)
+│   └── index.css               # Global CSS
 ├── index.html                  # Vite HTML entry point
-├── vite.config.js              # Vite configuration (base path set to /MortiMap/ for GH Pages)
+├── vite.config.js              # Vite configuration
 └── package.json
 ```
 
@@ -73,7 +74,7 @@ MortiMap/
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/<your-username>/MortiMap.git
+git clone https://github.com/mdziurzynski/MortiMap.git
 cd MortiMap
 
 # 2. Install dependencies
@@ -85,13 +86,11 @@ npm run dev
 
 The app will be available at **http://localhost:5173/MortiMap/**
 
-> **Note:** The first time you click "Map to Representatives", the browser will download the Minimap2 WebAssembly binary from BioWasm CDN (~10 MB). Subsequent runs within the same session are faster.
-
 ---
 
 ## Testing
 
-MortiMap uses **[Vitest](https://vitest.dev/)** for unit and integration testing. Logic is decoupled from the UI in `src/utils.js` for easy testability.
+MortiMap uses **[Vitest](https://vitest.dev/)** for unit and integration testing. Logic is decoupled from the UI for easy testability.
 
 ### 🏃 Running Tests
 
@@ -107,24 +106,16 @@ npx vitest
 
 ### ✍️ Writing New Tests
 
-Tests are located in `src/utils.test.js`. 
+Tests are located in `src/utils.test.js` and `src/nwaligner.test.js`.
 
-- **Unit Tests**: Add tests to the `parseFasta` or `selectBestHits` blocks to verify core logic (e.g., new IUPAC characters or ranking criteria).
-- **Mapping Scenarios**: Add mock alignment data to the `Mapping Scenarios` block to simulate how the system should handle specific reference hits without needing to run the full WebAssembly engine.
-
-Example test for a new utility:
-```js
-it('should do something correctly', () => {
-  const result = myNewUtility(input);
-  expect(result).toBe(expected);
-});
-```
+- **Unit Tests**: Add tests to verify core logic (e.g., restricted ACGTN vocabulary or ranking criteria).
+- **Mapping Scenarios**: Add mock alignment data to simulate how the system should handle specific reference hits.
 
 ---
 
 ## Using Your Own Reference Sequences
 
-Replace the placeholder file at `public/references.fasta` with your own centroid sequences in standard multi-FASTA format:
+Replace the file at `public/references.fasta` with your own centroid sequences in standard multi-FASTA format:
 
 ```
 >centroid_001
@@ -133,7 +124,7 @@ ATCGATCGATCG...
 GCTAGCTAGCTA...
 ```
 
-Up to ~1000 sequences are supported. There is no server-side processing — the entire reference database is fetched and loaded into browser memory on each run.
+Up to ~1000 sequences are supported. All references are fetching and processed locally in browser memory.
 
 ---
 
@@ -157,19 +148,13 @@ Deployment is fully automated via GitHub Actions. On every push to `main`, the w
 2. Builds the static bundle (`npm run build` → `dist/`)
 3. Deploys the `dist/` folder to the `gh-pages` environment
 
-To enable this in your fork:
-1. Go to **Settings → Pages** in your GitHub repository
-2. Set the source to **GitHub Actions**
-3. Push to `main` — the site will be live at `https://<your-username>.github.io/MortiMap/`
-
 ---
 
 ## Limitations
 
-- Maximum **10 input sequences** per run
+- Maximum **10 input sequences** per run (UI recommendation)
 - Maximum **2000 bp** per sequence
-- Requires an internet connection on first use (to fetch the Minimap2 Wasm binary from BioWasm CDN)
-- Alignment parameters are fixed to Minimap2's `-x sr` preset (tuned for short reads / ITS2 region)
+- Entirely local processing - no server side communication beyond initial fetch
 
 ---
 
